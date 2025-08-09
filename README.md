@@ -69,7 +69,7 @@ Add to your .claude.json (or equivalent MCP client config):
 - "Analyze this loader for C2 indicators and hardcoded framework names"
 - "Extract the top suspicious strings from this executable"
 - "Perform export table analysis on this file"
-- "Check file hashes, magic bytes, and entropy score"
+- "Check file hashes and entropy score"
 - "Identify any suspicious persistence or injection-related APIs"
 - "Run full OPSEC analysis on this loader for red team use"
 
