@@ -49,7 +49,7 @@ pip install -r requirements.txt
 ```
 
 ### 2. Configure in MCP Client
-Add to your .claude.json (or equivalent MCP client config):
+Add to your MCP servers JSON (or equivalent MCP client config):
 ```json
 {
   "mcpServers": {
