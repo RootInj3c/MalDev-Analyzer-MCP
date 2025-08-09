@@ -62,6 +62,17 @@ Add to your .claude.json (or equivalent MCP client config):
 }
 ```
 
+## 🔧 Example MCP Queries
+**Example queries you can ask through the MCP:**
+- "Scan this file for suspicious API calls and potential IAT hiding"
+- "Check this binary for section anomalies or known packer signatures"
+- "Analyze this loader for C2 indicators and hardcoded framework names"
+- "Extract the top suspicious strings from this executable"
+- "Perform export table analysis on this file"
+- "Check file hashes, magic bytes, and entropy score"
+- "Identify any suspicious persistence or injection-related APIs"
+- "Run full OPSEC analysis on this loader for red team use"
+
 ## 📜 License
 
 This project is licensed under the MIT License - see the *LICENSE* file for details.
