@@ -147,6 +147,17 @@ def shannon_entropy(data: bytes) -> float:
 
     return round(entropy, 4)
 
+def _sec_name(sec) -> str:
+    return sec.Name.rstrip(b"\x00").decode(errors="ignore")
+
+def _overlaps(a0, a1, b0, b1) -> bool:
+    return max(a0, b0) < min(a1, b1)
+
+# PE characteristics flags
+IMAGE_SCN_MEM_EXECUTE = 0x20000000
+IMAGE_SCN_MEM_READ    = 0x40000000
+IMAGE_SCN_MEM_WRITE   = 0x80000000
+
 # Common C2 / post-ex frameworks (expand anytime)
 C2_TERMS = {
     "cobalt", "cobaltstrike", "bruteratel", "brc4",
@@ -481,7 +492,7 @@ def _find_terms_fast(data: bytes, terms: list[str] | set[str]) -> list[str]:
 def extract_strings(file: str, min_length: int = 4, max_total: int = 20, deep_scan: bool = False) -> dict:
     """Get top-N strings and flag suspicious APIs & C2 terms.
     If deep_scan=True, scan the whole file bytes for API/C2 terms without extracting all strings.
-    No need to explain how it can be useful for. Just display the data.
+   Just display the data.
 
     Args:
         file: The file name or path provided. (i.e., local / absolute path)
@@ -529,9 +540,219 @@ def extract_strings(file: str, min_length: int = 4, max_total: int = 20, deep_sc
     }
 
 @mcp.tool()
+def pe_metadata(file: str) -> dict:
+    """Extract basic PE metadata.
+    
+    Args:
+        file: The file name or path provided. (i.e., local / absolute path)
+    """
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+    try:
+        pe = pefile.PE(file, fast_load=True)
+        pe.parse_data_directories()
+    except Exception as e:
+        return {"error": f"PE parse failed: {e}"}
+
+    from datetime import datetime
+    compile_ts = pe.FILE_HEADER.TimeDateStamp
+    metadata = {
+        "path": os.path.basename(file),
+        "image_base": hex(pe.OPTIONAL_HEADER.ImageBase),
+        "entry_point": hex(pe.OPTIONAL_HEADER.AddressOfEntryPoint),
+        "compile_time_utc": datetime.utcfromtimestamp(compile_ts).strftime('%Y-%m-%d %H:%M:%S'),
+        "machine": hex(pe.FILE_HEADER.Machine),
+        "subsystem": pe.OPTIONAL_HEADER.Subsystem,
+        "dll_characteristics": hex(pe.OPTIONAL_HEADER.DllCharacteristics),
+        "number_of_sections": pe.FILE_HEADER.NumberOfSections,
+    }
+
+    # lightweight compiler/runtime hints
+    blob = pe.__data__
+    hints = []
+    if b"go.buildid" in blob: hints.append("Go")
+    if b"mscoree.dll" in blob or b"Microsoft.CSharp" in blob: hints.append(".NET")
+    if b"rust_eh_personality" in blob: hints.append("Rust")
+    if b"UPX!" in blob: hints.append("Pack:UPX")
+    if hints: metadata["compiler_guess"] = ", ".join(hints)
+
+    return metadata
+
+@mcp.tool()
+def detect_shellcode(file: str) -> dict:
+    """Heuristic shellcode detection for raw blobs or embedded PE sections.
+    
+    Args:
+        file: The file name or path provided. (i.e., local / absolute path)
+    """
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+
+    with open(file, "rb") as f:
+        data = f.read()
+
+    result = {"path": os.path.basename(file), "size": len(data)}
+    flags = []
+
+    # Heuristic A: PE header presence
+    is_pe = data.startswith(b"MZ")
+    result["has_pe_header"] = bool(is_pe)
+
+    # Heuristic B: entropy of whole file (raw blobs)
+    ent = shannon_entropy(data[: min(len(data), 2_000_000)])  # cap to 2MB for speed
+    result["entropy"] = ent
+    if not is_pe and ent >= 7.4:
+        flags.append("raw_high_entropy")
+
+    # Heuristic C: syscall stub bytes (x64 common sequence: mov r10, rcx; syscall)
+    # 4C 8B D1  B8 xx xx xx xx  0F 05  C3
+    if re.search(b"\x4C\x8B\xD1.{5}\x0F\x05\xC3", data, re.DOTALL):
+        flags.append("syscall_stub_pattern")
+
+    # Heuristic D: 0x0F 0x05 occurrences
+    if data.count(b"\x0F\x05") >= 2:
+        flags.append("multiple_syscall_markers")
+
+    # Heuristic E: CALL-POP/JMP-CALL (typical shellcode)
+    if re.search(b"\xE8....\x5B", data, re.DOTALL) or re.search(b"\xEB.\xE8...", data, re.DOTALL):
+        flags.append("call_pop_or_jmp_call")
+
+    # Heuristic F: long NOP sleds
+    if b"\x90"*64 in data:
+        flags.append("nop_sled_64+")
+
+    # If PE, inspect sections for embedded shellcode traits
+    embedded = []
+    if is_pe:
+        try:
+            pe = pefile.PE(data=data, fast_load=True)
+            for s in pe.sections:
+                name = _sec_name(s)
+                sec = s.get_data()
+                e = shannon_entropy(sec)
+                rwx = bool(s.Characteristics & IMAGE_SCN_MEM_WRITE) and bool(s.Characteristics & IMAGE_SCN_MEM_EXECUTE)
+                rx_in_data = (name.startswith(".data") and bool(s.Characteristics & IMAGE_SCN_MEM_EXECUTE))
+                hit = {
+                    "section": name,
+                    "entropy": e,
+                    "rwx": rwx,
+                    "rx_in_data": rx_in_data
+                }
+                if e >= 7.4 and (name in (".text", ".data") or rwx or rx_in_data):
+                    hit["flag"] = "suspicious_embedded_payload"
+                    embedded.append(hit)
+        except Exception:
+            pass
+
+    # Score (0–10)
+    score = 0
+    weight = {
+        "raw_high_entropy": 3,
+        "syscall_stub_pattern": 3,
+        "multiple_syscall_markers": 2,
+        "call_pop_or_jmp_call": 1,
+        "nop_sled_64+": 1,
+    }
+    for f in flags:
+        score += weight.get(f, 1)
+    if embedded:
+        score += 3
+    score = min(score, 10)
+
+    result.update({
+        "flags": flags,
+        "embedded_suspicious_sections": embedded,
+        "score": score,
+        "verdict": "🔴 Likely shellcode/packed" if score >= 8 else ("🟠 Suspicious" if score >= 5 else "🟢 Low")
+    })
+    return result
+
+@mcp.tool()
+def section_rwx_analysis(file: str) -> dict:
+    """Check for RWX/overlap and suspicious executable placement.
+    
+    Args:
+        file: The file name or path provided. (i.e., local / absolute path)
+    """
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+    try:
+        pe = pefile.PE(file, fast_load=True)
+        pe.parse_data_directories()
+    except Exception as e:
+        return {"error": f"PE parse failed: {e}"}
+
+    secs = []
+    problems = {
+        "rwx_sections": [],
+        "rx_in_data": [],
+        "writable_text": [],
+        "overlaps": [],
+        "high_entropy_text": []
+    }
+
+    # collect VA ranges and attributes
+    ranges = []
+    image_base = pe.OPTIONAL_HEADER.ImageBase
+    for s in pe.sections:
+        name = _sec_name(s)
+        va   = s.VirtualAddress
+        vsz  = max(s.Misc_VirtualSize, s.SizeOfRawData) or s.SizeOfRawData
+        start = image_base + va
+        end   = start + vsz
+        ch    = s.Characteristics
+        ent   = shannon_entropy(s.get_data())
+
+        info = {
+            "name": name,
+            "va_start": hex(start),
+            "va_end": hex(end),
+            "raw_size": s.SizeOfRawData,
+            "virt_size": s.Misc_VirtualSize,
+            "entropy": ent,
+            "R": bool(ch & IMAGE_SCN_MEM_READ),
+            "W": bool(ch & IMAGE_SCN_MEM_WRITE),
+            "X": bool(ch & IMAGE_SCN_MEM_EXECUTE),
+        }
+        secs.append(info)
+        ranges.append((name, start, end))
+
+        if info["W"] and info["X"]:
+            problems["rwx_sections"].append(name)
+        if name.startswith(".data") and info["X"]:
+            problems["rx_in_data"].append(name)
+        if name == ".text" and info["W"]:
+            problems["writable_text"].append(name)
+        if name == ".text" and ent >= 7.6:
+            problems["high_entropy_text"].append({"name": name, "entropy": ent})
+
+    # overlaps
+    for i in range(len(ranges)):
+        for j in range(i+1, len(ranges)):
+            n1,a0,a1 = ranges[i]
+            n2,b0,b1 = ranges[j]
+            if _overlaps(a0,a1,b0,b1):
+                problems["overlaps"].append(f"{n1} <-> {n2}")
+
+    # overall risk
+    score = 0
+    if problems["rwx_sections"]: score += 4
+    if problems["rx_in_data"]:   score += 3
+    if problems["writable_text"]:score += 2
+    if problems["overlaps"]:     score += 2
+    if problems["high_entropy_text"]: score += 2
+    score = min(score, 10)
+
+    return {
+        "sections": secs,
+        "problems": problems,
+        "score": score,
+        "verdict": "🔴 Risky layout" if score >= 8 else ("🟠 Suspicious" if score >= 5 else "🟢 OK")
+    }
+    
+@mcp.tool()
 def extract_and_flag_apis(file: str) -> dict:
     """Extract strings and flag suspicious API calls.
-    No need to explain how it can be useful for. Just display the strings that may be suspicous.
 
     Args:
         file: The file name or path provided. (i.e., local / absolute path)
