@@ -1,8 +1,8 @@
 # MalDev Analyzer MCP
 
-**Built for red teamers, by red teamers** — an MCP-powered assistant for malware development, OPSEC testing, and custom loader design during red team engagements.
+**Built for red teamers, by red teamers** - an MCP-powered assistant for malware development, OPSEC testing, and custom loader design during red team engagements.
 
-MalDev Analyzer MCP is designed to help offensive security professionals and malware developers quickly evaluate Windows binaries for traits that may impact stealth, functionality, or OPSEC. Whether you’re building a loader, refining an implant, or validating payload security posture, this tool provides fast, targeted insights.
+MalDev Analyzer MCP is designed to help offensive security professionals and malware developers quickly evaluate Windows binaries for traits that may impact stealth, functionality, or OPSEC. Whether you're building a loader, refining an implant, or validating payload security posture, this tool provides fast, targeted insights.
 
 # Why?
 
@@ -10,7 +10,7 @@ As a red-teamer - in real-world red team engagements, time is a luxury.
 Most malware analysis and OPSEC checks require juggling a patchwork of GUI tools, including PE-Bear, Detect-It-Easy, Resource Hacker, and YARA scanners, among others. Each one demands manual clicks, context switching, and repetitive tasks just to extract the handful of indicators you care about.
 
 **MalDev Analyzer MCP** was built to eliminate that friction.
-By embedding a full suite of PE inspection, loader analysis, and OPSEC checks directly into your MCP-compatible IDE (like Cursor or Claude’s MCP mode), you can query and analyze binaries without leaving your workflow.
+By embedding a full suite of PE inspection, loader analysis, and OPSEC checks directly into your MCP-compatible IDE (like Cursor or Claude's MCP mode), you can query and analyze binaries without leaving your workflow.
 
 Instead of:
 - Opening a GUI
