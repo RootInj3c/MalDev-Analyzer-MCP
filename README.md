@@ -27,7 +27,8 @@ MalDev Analyzer MCP is designed to help offensive security professionals and mal
 | **Shannon Entropy** | Detect high-entropy data that may indicate encryption/packing. |
 | **Import Table (IAT) Analysis** | Compare declared imports to discovered API usage to spot hiding/obfuscation. |
 | **Export Table Analysis** | Highlight exports with suspicious keywords or patterns. |
-| **PE Metadata analyzer** | Extract basic file metadata for further profiling. |
+| **PE Metadata Information** | Extract basic file metadata for further profiling. |
+| **PE Sections Inspection** | Perform heuristic shellcode detection for raw blobs or embedded PE sections.  |
 ---
 
 ## 📋 Prerequisites
