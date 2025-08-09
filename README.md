@@ -4,6 +4,24 @@
 
 MalDev Analyzer MCP is designed to help offensive security professionals and malware developers quickly evaluate Windows binaries for traits that may impact stealth, functionality, or OPSEC. Whether you’re building a loader, refining an implant, or validating payload security posture, this tool provides fast, targeted insights.
 
+# Why?
+
+As a red-teamer - in real-world red team engagements, time is a luxury.
+Most malware analysis and OPSEC checks require juggling a patchwork of GUI tools, including PE-Bear, Detect-It-Easy, Resource Hacker, and YARA scanners, among others. Each one demands manual clicks, context switching, and repetitive tasks just to extract the handful of indicators you care about.
+
+**MalDev Analyzer MCP** was built to eliminate that friction.
+By embedding a full suite of PE inspection, loader analysis, and OPSEC checks directly into your MCP-compatible IDE (like Cursor or Claude’s MCP mode), you can query and analyze binaries without leaving your workflow.
+
+Instead of:
+- Opening a GUI
+- Navigating menus
+- Exporting intermediate results
+- Manually correlating strings, IAT entries, entropy values, and section flags
+
+Now you can now simply ask your MCP assistant to "Check this loader for suspicious API calls and section anomalies" and get a structured, actionable output instantly.
+
+This means faster turnarounds, less human error, and more focus on **developing and refining your custom loaders** - not wrestling with a dozen different GUIs.
+
 ---
 
 ## ✨ Key Features
