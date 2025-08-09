@@ -56,7 +56,7 @@ Add to your .claude.json (or equivalent MCP client config):
   "mcpServers": {
     "maldev-analyzer": {
       "command": "python",
-      "args": ["PATH/TO/opsec.py"]
+      "args": ["PATH/TO/maldev_analyzer.py"]
     }
   }
 }
