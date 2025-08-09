@@ -1,0 +1,3 @@
+pefile
+mcp-server
+fastmcp
