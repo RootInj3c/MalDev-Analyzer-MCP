@@ -31,7 +31,7 @@ By performing **contextual scoring** instead of raw dumping, you immediately kno
 
 The goal: bridge the gap between *generic PE analysis* and **practical OPSEC testing** for loader and implant development - all inside an MCP workflow, without bouncing between multiple GUIs or command-line tools.
 
-This means **faster turnarounds**, **less human error**, and **more focus on developing and refining your custom loaders** — not wrestling with a dozen disconnected tools.
+This means **faster turnarounds**, **less human error**, and **more focus on developing and refining your custom loaders** - not wrestling with a dozen disconnected tools.
 
 ## 🛠 Included Analysis Tools
 
