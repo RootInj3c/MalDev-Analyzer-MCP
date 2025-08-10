@@ -6,48 +6,6 @@ MalDev Analyzer MCP is designed to help offensive security professionals and mal
 
 **TL'DR: want to jump to installation? Go to [Prerequisites & Quick Installation](https://github.com/RootInj3c/MalDev-Analyzer-MCP?tab=readme-ov-file#-prerequisites) section.**
 
-# Why?
-
-As a red-teamer - in real-world red team engagements, time is a luxury.
-Most malware analysis and OPSEC checks require juggling a patchwork of GUI tools, including PE-Bear, Detect-It-Easy, Resource Hacker, and YARA scanners, among others. Each one demands manual clicks, context switching, and repetitive tasks just to extract the handful of indicators you care about.
-
-**MalDev Analyzer MCP** was built to eliminate that friction.
-By embedding a full suite of PE inspection, loader analysis, and OPSEC checks directly into your MCP-compatible IDE (like Cursor or Claude's MCP mode), you can query and analyze binaries without leaving your workflow.
-
-Instead of:
-- Opening a GUI
-- Navigating menus
-- Exporting intermediate results
-- Manually correlating strings, IAT entries, entropy values, and section flags
-
-Now you can now simply ask your MCP assistant to "Check this loader for suspicious API calls and section anomalies" and get a structured, actionable output instantly.
-
-This means faster turnarounds, less human error, and more focus on **developing and refining your custom loaders** - not wrestling with a dozen different GUIs.
-
-# So what’s different from another PE parser?
-
-This isn’t just *another* PE header dumper.
-Most PE parsers (like pefile-based scripts or GUI tools such as PE-bear) focus on structural inspection - they tell you what is in the binary, but they don’t make strong judgments or connect the dots for malware development and red team OPSEC.
-
-MalDev Analyzer MCP was built by red teamers for red teamers, so it layers threat-oriented heuristics on top of normal PE parsing.
-
-Instead of only printing imports and sections, it:
-- Correlates IAT vs. runtime strings to uncover IAT hiding & dynamic API resolution.
-- Classifies sections using known baselines, and flags anomalies or packer indicators (e.g., .upx, .rsrc2, .textbss).
-  
-And detects real-world malicious traits like:
-- AMSI/ETW patch patterns
-- C2 framework indicators (Sliver, Cobalt Strike, Mythic, etc.)
-- RWX / executable-writable section mapping (shellcode-friendly regions)
-- TLS callbacks (stealth loader entrypoints)
-- Embedded shellcode or encrypted blobs in .rsrc
-- Suspicious API usage, even when not imported directly
-
-Performs contextual scoring instead of raw dumping, so you immediately know whether a finding is benign-looking, suspicious, or likely malicious.
-The goal is to bridge the gap between "generic PE analysis" and practical OPSEC testing for loader and implant development - all inside an MCP workflow, without bouncing between multiple GUIs or command-line tools.
-
----
-
 ## ✨ Key Features
 
 - **MCP Integration** – Works with the [Model Context Protocol](https://modelcontextprotocol.io/) to interact directly with compatible AI assistants like Cursor.
@@ -56,6 +14,26 @@ The goal is to bridge the gap between "generic PE analysis" and practical OPSEC 
 - **Custom Loader Support** – Designed with loader development workflows in mind.
 
 ---
+
+# Motivation
+
+As a red-teamer, time is a luxury.  
+In real-world red team engagements, malware analysis and OPSEC checks often require juggling a patchwork of GUI tools — PE-Bear, Detect-It-Easy, Resource Hacker, YARA scanners, and more. Each demands manual clicks, constant context switching, and repetitive steps just to extract the handful of indicators you actually care about.
+
+**MalDev Analyzer MCP** was built to eliminate that friction.  
+By embedding a full suite of PE inspection, loader analysis, and OPSEC heuristics directly into your MCP-compatible IDE (like Cursor or Claude’s MCP mode), you can query and analyze binaries without leaving your workflow.
+
+With MalDev Analyzer MCP you can:
+- **Correlate** IAT entries vs. runtime strings to uncover IAT hiding & dynamic API resolution.
+- **Classify** sections using known baselines, flag anomalies, and detect packer indicators (e.g., `.upx`, `.rsrc2`, `.textbss`).
+- **Detect** real-world malicious traits like AMSI/ETW patch patterns, C2 framework indicators, embedded shellcode, or encrypted blobs.
+- ...and **much more**.
+
+By performing **contextual scoring** instead of raw dumping, you immediately know whether a finding is benign, suspicious, or likely malicious.
+
+The goal: bridge the gap between *generic PE analysis* and **practical OPSEC testing** for loader and implant development - all inside an MCP workflow, without bouncing between multiple GUIs or command-line tools.
+
+This means **faster turnarounds**, **less human error**, and **more focus on developing and refining your custom loaders** — not wrestling with a dozen disconnected tools.
 
 ## 🛠 Included Analysis Tools
 
