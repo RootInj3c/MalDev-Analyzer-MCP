@@ -4,7 +4,7 @@
 
 MalDev Analyzer MCP is designed to help offensive security professionals and malware developers quickly evaluate Windows binaries for traits that may impact stealth, functionality, or OPSEC. Whether you're building a loader, refining an implant, or validating payload security posture, this tool provides fast, targeted insights.
 
-**TL'DR: want to jump to installation? Go to [Kickoff](https://github.com/RootInj3c/MalDev-Analyzer-MCP?tab=readme-ov-file#-prerequisites) section.**
+**TL'DR: want to jump to installation? Go to [Prerequisites & Quick Installation](https://github.com/RootInj3c/MalDev-Analyzer-MCP?tab=readme-ov-file#-prerequisites) section.**
 
 # Why?
 
