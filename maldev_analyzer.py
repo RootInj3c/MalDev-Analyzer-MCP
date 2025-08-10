@@ -579,6 +579,314 @@ def pe_metadata(file: str) -> dict:
     return metadata
 
 @mcp.tool()
+def detect_etw_artifacts(file: str, strict_mode: bool = False) -> dict:
+    """Detect ETW usage and common inline patch patterns (e.g., EtwEventWrite -> ret 0)."""
+    
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+
+    try:
+        pe = pefile.PE(file, fast_load=True)
+        pe.parse_data_directories()
+    except Exception as e:
+        return {"error": f"PE parse failed: {e}"}
+
+    etw_imports = []
+    has_advapi = False
+    imported_etw_rvas = []
+    if hasattr(pe, "DIRECTORY_ENTRY_IMPORT"):
+        for entry in pe.DIRECTORY_ENTRY_IMPORT:
+            dll = (entry.dll or b"").decode(errors="ignore").lower()
+            if "advapi32.dll" in dll:
+                has_advapi = True
+            for imp in entry.imports:
+                if not imp.name:
+                    continue
+                name = imp.name.decode(errors="ignore")
+                if name.startswith("Etw"):
+                    etw_imports.append(f"{dll}:{name}" if dll else name)
+                if name == "EtwEventWrite" and imp.address:
+                    try:
+                        rva = imp.address - pe.OPTIONAL_HEADER.ImageBase
+                        imported_etw_rvas.append(rva)
+                    except Exception:
+                        pass
+
+    with open(file, "rb") as f:
+        data = f.read()
+
+    etw_strings = []
+    for m in (b"EtwEventWrite", b"EtwRegister", b"EtwUnregister"):
+        if m in data:
+            etw_strings.append(m.decode("latin1"))
+
+    # patch signatures (same as AMSI, return-success stubs)
+    sigs = {
+        "x64_xor_rax_ret": b"\x48\x31\xC0\xC3",
+        "x64_mov_eax0_ret": b"\xB8\x00\x00\x00\x00\xC3",
+        "x86_xor_eax_ret":  b"\x33\xC0\xC3",
+        "x86_mov_eax0_ret": b"\xB8\x00\x00\x00\x00\xC3",
+    }
+
+    patch_hits = []
+    try:
+        for s in pe.sections:
+            if not (s.Characteristics & IMAGE_SCN_MEM_EXECUTE):
+                continue
+            sec = s.get_data()
+            base_rva = s.VirtualAddress
+            name = _sec_name(s)
+            for label, sig in sigs.items():
+                start = 0
+                while True:
+                    idx = sec.find(sig, start)
+                    if idx == -1:
+                        break
+                    patch_hits.append({"section": name, "pattern": label, "rva": hex(base_rva + idx)})
+                    start = idx + 1
+    except Exception:
+        pass
+
+    # proximity scan near IAT thunk for EtwEventWrite
+    near_hits = []
+    try:
+        mm = pe.get_memory_mapped_image()
+        for rva in imported_etw_rvas:
+            window = mm[max(0, rva - 64): rva + 64]
+            for label, sig in sigs.items():
+                k = window.find(sig)
+                if k != -1:
+                    near_hits.append({"around": "IAT:EtwEventWrite", "pattern": label, "rva_window_start": hex(max(0, rva - 64))})
+    except Exception:
+        pass
+
+    have_markers = bool(etw_imports or etw_strings or has_advapi)
+    have_patches = bool(patch_hits or near_hits)
+
+    score = 0
+    if has_advapi:  score += 1
+    if etw_imports: score += 2
+    if etw_strings: score += 2
+    if have_patches: score += 4
+    score = min(10, score)
+
+    if strict_mode:
+        verdict = ("🔴 Likely ETW patcher/bypass" if (have_markers and have_patches and score >= 8)
+                   else "🟠 ETW usage / possible bypass" if have_markers or have_patches
+                   else "🟢 Low")
+    else:
+        verdict = ("🔴 Likely ETW patcher/bypass" if score >= 8
+                   else "🟠 ETW usage / possible bypass" if score >= 5
+                   else "🟢 Low")
+
+    return {
+        "etw_imports": sorted(set(etw_imports)),
+        "etw_strings": sorted(set(etw_strings)),
+        "patch_signatures": patch_hits[:100],
+        "proximity_hits": near_hits[:50],
+        "strict_mode": bool(strict_mode),
+        "score": score,
+        "verdict": verdict
+    }
+
+@mcp.tool()
+def detect_hashed_api_resolution(file: str) -> dict:
+    """Heuristics for API hashing loops (ROR/XOR) and hashed tables in data sections."""
+    
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+    with open(file, "rb") as f:
+        data = f.read()
+
+    is_pe = data.startswith(b"MZ")
+    flags = []
+    ror_patterns = [
+        b"\xC1\xC8\x0D",       # ror eax, 13 (x86)
+        b"\x48\xC1\xC9\x0D",   # ror rcx, 13 (x64)
+        b"\xC1\xCA\x0D",       # ror edx, 13
+        b"\xD1\xC8",           # ror eax,1 (generic)
+        b"\x4C\x8B\xD1"        # mov r10,rcx (often in syscall/hash stubs)
+    ]
+    for p in ror_patterns:
+        if p in data:
+            flags.append("ror_loop_bytes")
+
+    # Look for xor/add/ror combinational loop bytes near each other
+    if re.search(b"(?:\x33.|[\x80-\x83].{1}|\x05....).{0,24}(?:\xC1[\xC8-\xCF].)", data, re.DOTALL):
+        flags.append("xor_add_ror_mix")
+
+    # Scan .data/.rdata for sequences of many 4-byte non-zero constants (possible hash tables)
+    table_hits = []
+    if is_pe:
+        try:
+            pe = pefile.PE(data=data, fast_load=True)
+            for s in pe.sections:
+                name = _sec_name(s).lower()
+                if not (name.startswith(".data") or name.startswith(".rdata")):
+                    continue
+                sec = s.get_data()
+                # look for >= 8 consecutive dwords of non-zero values
+                i = 0
+                consec = 0
+                start_off = None
+                while i + 4 <= len(sec):
+                    d = int.from_bytes(sec[i:i+4], "little")
+                    if d not in (0, 0xFFFFFFFF):
+                        consec += 1
+                        if consec == 1:
+                            start_off = i
+                        if consec >= 8:
+                            table_hits.append({"section": name, "rva": hex(s.VirtualAddress + start_off)})
+                            break
+                    else:
+                        consec = 0
+                        start_off = None
+                    i += 4
+        except Exception:
+            pass
+
+    score = min(10, (3 if "xor_add_ror_mix" in flags else 0) + (2 if "ror_loop_bytes" in flags else 0) + (3 if table_hits else 0))
+    return {
+        "flags": list(sorted(set(flags))),
+        "hash_table_candidates": table_hits[:20],
+        "score": score,
+        "verdict": "🟠 Possible API hashing" if score >= 5 else "🟢 Low"
+    }
+
+@mcp.tool()
+def detect_syscall_stubs(file: str) -> dict:
+    """Detect common x64 syscall stubs and markers (mov r10, rcx; syscall; ret)."""
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+    with open(file, "rb") as f:
+        data = f.read()
+
+    is_pe = data.startswith(b"MZ")
+    hits_global = []
+    # Classic x64 stub: 4C 8B D1  B8 ?? ?? ?? ??  0F 05  C3
+    stub_re = re.compile(b"\x4C\x8B\xD1.{5}\x0F\x05\xC3", re.DOTALL)
+    for m in stub_re.finditer(data):
+        hits_global.append({"offset": hex(m.start()), "pattern": "mov r10,rcx; syscall; ret"})
+
+    # Count raw syscall opcodes
+    syscall_count = data.count(b"\x0F\x05")
+
+    section_hits = []
+    if is_pe:
+        try:
+            pe = pefile.PE(data=data, fast_load=True)
+            for s in pe.sections:
+                sec = s.get_data()
+                count = sec.count(b"\x0F\x05")
+                if count >= 1:
+                    section_hits.append({
+                        "section": _sec_name(s),
+                        "syscall_count": count
+                    })
+        except Exception:
+            pass
+
+    score = min(10, (len(hits_global) * 3) + (2 if syscall_count >= 2 else 0) + (3 if section_hits else 0))
+    return {
+        "global_stub_hits": hits_global[:50],
+        "syscall_opcode_count": syscall_count,
+        "section_syscall_hits": section_hits,
+        "score": score,
+        "verdict": "🔴 Likely manual syscalls" if score >= 8 else ("🟠 Suspicious" if score >= 5 else "🟢 Low")
+    }
+
+@mcp.tool()
+def tls_callbacks(file: str) -> dict:
+    """Enumerate TLS callbacks (often used for stealthy loader execution)."""
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+    try:
+        pe = pefile.PE(file, fast_load=True)
+        pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_TLS']])
+    except Exception as e:
+        return {"error": f"PE parse failed: {e}"}
+
+    if not hasattr(pe, "DIRECTORY_ENTRY_TLS") or not pe.DIRECTORY_ENTRY_TLS:
+        return {"count": 0, "callbacks": []}
+
+    cbs = []
+    for tls in pe.DIRECTORY_ENTRY_TLS:
+        try:
+            addrs = tls.struct.AddressOfCallBacks
+            if not addrs:
+                continue
+            # Read callback array until NULL
+            ptr_size = 8 if pe.PE_TYPE == pefile.OPTIONAL_HEADER_MAGIC_PE_PLUS else 4
+            offset = pe.get_offset_from_rva(addrs - pe.OPTIONAL_HEADER.ImageBase)
+            while True:
+                raw = pe.__data__[offset:offset+ptr_size]
+                if len(raw) < ptr_size:
+                    break
+                val = int.from_bytes(raw, "little")
+                if val == 0:
+                    break
+                cbs.append(hex(val))
+                offset += ptr_size
+        except Exception:
+            pass
+
+    return {"count": len(cbs), "callbacks": cbs[:32]}
+    
+@mcp.tool()
+def inspect_resources(file: str, max_items: int = 20) -> dict:
+    """Parse .rsrc and flag high-entropy or suspicious-looking resource blobs."""
+    if not os.path.exists(file):
+        return {"error": f"File not found: {file}"}
+    try:
+        pe = pefile.PE(file, fast_load=True)
+        pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']])
+    except Exception as e:
+        return {"error": f"PE parse failed: {e}"}
+
+    if not hasattr(pe, "DIRECTORY_ENTRY_RESOURCE"):
+        return {"items": []}
+
+    suspicious = []
+    markers = [
+        (b"MZ", "pe_header"),
+        (b"PK\x03\x04", "zip"),
+        (b"%PDF", "pdf"),
+        (b"<script", "html_js"),
+        (b"powershell", "powershell"),
+        (b"cmd.exe", "cmd"),
+        (b"encrypted", "keyword_encrypted")
+    ]
+
+    for entry in getattr(pe, "DIRECTORY_ENTRY_RESOURCE", []):
+        for res_type in entry.directory.entries:
+            for res_id in getattr(res_type.directory, "entries", []):
+                for lang in getattr(res_id.directory, "entries", []):
+                    data_rva = lang.data.struct.OffsetToData
+                    size = lang.data.struct.Size
+                    try:
+                        raw = pe.get_memory_mapped_image()[data_rva:data_rva+size]
+                    except Exception:
+                        continue
+                    ent = shannon_entropy(raw)
+                    flags = []
+                    for sig, name in markers:
+                        if sig.lower() in raw.lower():
+                            flags.append(name)
+                    if ent >= 7.4 or flags or raw.startswith(b"MZ"):
+                        suspicious.append({
+                            "type": getattr(res_type, "id", None),
+                            "id": getattr(res_id, "id", None),
+                            "lang": getattr(lang, "id", None),
+                            "size": size,
+                            "entropy": round(ent, 4),
+                            "flags": flags[:5]
+                        })
+
+    # sort by entropy desc and size
+    suspicious.sort(key=lambda x: (x["entropy"], x["size"]), reverse=True)
+    return {"items": suspicious[:max_items]}
+    
+@mcp.tool()
 def detect_shellcode(file: str) -> dict:
     """Heuristic shellcode detection for raw blobs or embedded PE sections.
     
