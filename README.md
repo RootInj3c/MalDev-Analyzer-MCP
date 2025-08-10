@@ -13,8 +13,6 @@ MalDev Analyzer MCP is designed to help offensive security professionals and mal
 - **OPSEC Checks** – Spot traits that could raise detection risk during engagements.
 - **Custom Loader Support** – Designed with loader development workflows in mind.
 
----
-
 # Motivation
 
 As a red-teamer, time is a luxury.  
@@ -49,7 +47,6 @@ This means **faster turnarounds**, **less human error**, and **more focus on dev
 | **Export Table Analysis** | Highlight exports with suspicious keywords or patterns. |
 | **PE Metadata Information** | Extract basic file metadata for further profiling. |
 | **PE Sections Inspection** | Perform heuristic shellcode detection for raw blobs or embedded PE sections.  |
----
 
 ## 📋 Prerequisites
 
