@@ -34,6 +34,7 @@ MalDev Analyzer MCP was built by red teamers for red teamers, so it layers threa
 Instead of only printing imports and sections, it:
 - Correlates IAT vs. runtime strings to uncover IAT hiding & dynamic API resolution.
 - Classifies sections using known baselines, and flags anomalies or packer indicators (e.g., .upx, .rsrc2, .textbss).
+  
 And detects real-world malicious traits like:
 - AMSI/ETW patch patterns
 - C2 framework indicators (Sliver, Cobalt Strike, Mythic, etc.)
